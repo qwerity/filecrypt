@@ -21,10 +21,7 @@ struct EvpKeyDeleter {
         }
     }
 };
-
 using EvpKeyPtr = std::unique_ptr<EVP_PKEY, EvpKeyDeleter>;
-using CipherCtxPtr = std::unique_ptr<EVP_CIPHER_CTX, decltype(&EVP_CIPHER_CTX_free)>;
-using MdCtxPtr = std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)>;
 
 result::Result<EvpKeyPtr> loadPrivateKey(const std::filesystem::path& path);
 result::Result<EvpKeyPtr> loadPublicKey(const std::filesystem::path& path);
