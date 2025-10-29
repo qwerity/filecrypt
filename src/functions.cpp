@@ -42,9 +42,12 @@ result::Status runEncrypt(const options::EncryptOptions& options) {
     }
 
     std::cout << "Encryption complete.\n";
-    std::cout << "Key (hex): " << options.encryptionKeyHex << "\n";
-    std::cout << "IV (hex): " << *ivHex << "\n";
-    std::cout << "Tag (hex): " << *tagHex << "\n";
+    if (options.verbose)
+    {
+        std::cout << "Key (hex): " << options.encryptionKeyHex << "\n";
+        std::cout << "IV (hex): " << *ivHex << "\n";
+        std::cout << "Tag (hex): " << *tagHex << "\n";
+    }
     std::cout << "Signature (hex): " << *signatureHex << "\n";
     std::cout << "Encrypted to " << options.outputPath.string() << "\n";
 

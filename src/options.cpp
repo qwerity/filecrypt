@@ -78,9 +78,6 @@ result::Result<EncryptOptions> parseEncrypt(int argc, char** argv) {
             }
             opts.signingKeyPath = *value;
             signSet = true;
-        } else if (arg == "--help") {
-            std::cout << usageText();
-            std::exit(0);
         } else {
             return result::makeError("Unknown argument: " + std::string(arg) + "\n" + usageText());
         }
@@ -168,9 +165,6 @@ result::Result<DecryptOptions> parseDecrypt(int argc, char** argv) {
             }
             opts.signatureHexInput = std::move(*value);
             signatureSet = true;
-        } else if (arg == "--help") {
-            std::cout << usageText();
-            std::exit(0);
         } else {
             return result::makeError("Unknown argument: " + std::string(arg) + "\n" + usageText());
         }
@@ -182,11 +176,17 @@ result::Result<DecryptOptions> parseDecrypt(int argc, char** argv) {
     if (!keySet) {
         return result::makeError("Argument --enc-key is required.\n" + usageText());
     }
+    if (opts.encryptionKeyHex.length() != 64) {
+        return result::makeError("--enc-key must be 64 hex characters (32 bytes).\n" + usageText());
+    }
     if (!verifySet) {
         return result::makeError("--verify-key is required for decryption");
     }
     if (!signatureSet) {
         return result::makeError("--signature is required for decryption (pass the value printed during encrypt)");
+    }
+    if (opts.signatureHexInput.length() % 2 != 0) {
+        return result::makeError("--signature must be a valid hex string of even length.\n" + usageText());
     }
     if (!outputSet) {
         opts.outputPath = opts.inputPath;
@@ -197,6 +197,10 @@ result::Result<DecryptOptions> parseDecrypt(int argc, char** argv) {
     if (!std::filesystem::exists(opts.inputPath)) {
         return result::makeError("Input file does not exist: " + opts.inputPath.string());
     }
+    if (std::filesystem::file_size(opts.inputPath) < crypto::AES_256_GCM_IV_SIZE + crypto::AES_256_GCM_TAG_SIZE)
+    {
+        return result::makeError("Input file is too small for decryption: " + opts.inputPath.string());
+    }
     if (!std::filesystem::exists(opts.verifyKeyPath)) {
         return result::makeError("Verification key file does not exist: " + opts.verifyKeyPath.string());
     }
@@ -204,17 +208,30 @@ result::Result<DecryptOptions> parseDecrypt(int argc, char** argv) {
     return opts;
 }
 
+bool checkAndPrintHelp(const int argc, char** argv)
+{
+    for (int i = 2; i < argc; ++i)
+    {
+        const std::string_view arg = argv[i];
+        if (arg == "--help")
+        {
+            std::cout << usageText();
+            return true;
+        }
+    }
+    return false;
+}
+
 result::Result<ProgramOptions> parseArguments(int argc, char** argv) {
     if (argc < 2) {
         return result::makeError("Missing mode. Use 'encrypt' or 'decrypt'.\n" + usageText());
     }
 
-    const std::string modeArg = argv[1];
-    if (modeArg == "--help") {
-        std::cout << usageText();
-        std::exit(0);
+    if (checkAndPrintHelp(argc, argv)) {
+        return ProgramOptions{std::in_place_type<HelpRequested>};
     }
 
+    const std::string modeArg = argv[1];
     if (modeArg == "encrypt") {
         auto opts = parseEncrypt(argc, argv);
         if (!opts) {

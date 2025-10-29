@@ -8,9 +8,11 @@ namespace {
 
 class TempFile {
 public:
-    explicit TempFile(std::string name) : path(std::move(name)) {
+    explicit TempFile(std::string name, const int size = 1) : path(std::move(name)) {
         std::ofstream file(path);
-        file << "x";
+        for (int i = 0; i < size; ++i) {
+            file << "x";
+        }
     }
     ~TempFile() {
         std::error_code ec;
@@ -40,7 +42,7 @@ TEST(OptionsTest, EncryptMode) {
 }
 
 TEST(OptionsTest, DecryptMode) {
-    TempFile input("opt_input_dec.txt");
+    TempFile input("opt_input_dec.txt", 60);
     TempFile verify("opt_verify.pem");
     const char* argv[] = {"filecrypt", "decrypt", "--in", input.c_str(), "--out", "output.txt", "--enc-key", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "--verify-key", verify.c_str(), "--signature", "abcdef"};
     constexpr int argc = sizeof(argv) / sizeof(char*);

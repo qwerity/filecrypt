@@ -12,15 +12,23 @@ int main(const int argc, char** argv) {
     }
     const auto& optionsVariant = *optionsResult;
 
+    if (std::holds_alternative<options::HelpRequested>(*optionsResult)) {
+        return 0;
+    }
+
     result::Status status;
     if (const auto* encryptOptions = std::get_if<options::EncryptOptions>(&optionsVariant)) {
         status = runEncrypt(*encryptOptions);
+    } else if (const auto* decryptOptions = std::get_if<options::DecryptOptions>(&optionsVariant)) {
+        status = runDecrypt(*decryptOptions);
     } else {
-        status = runDecrypt(std::get<options::DecryptOptions>(optionsVariant));
+        return 1; // Should not happen
     }
+
     if (!status) {
         std::cerr << "Error: " << status.error() << '\n';
-        return 1;
+        return 2;
     }
+
     return 0;
 }

@@ -12,7 +12,25 @@
 
 namespace crypto {
 
+constexpr std::size_t AES_256_KEY_SIZE = 32;
+constexpr std::size_t AES_256_GCM_IV_SIZE = 12;
+constexpr std::size_t AES_256_GCM_TAG_SIZE = 16;
+
 using ByteBuffer = std::vector<unsigned char>;
+
+// struct SecureBuffer {
+//     std::vector<std::uint8_t> data;
+//
+//     explicit SecureBuffer(std::size_t n = 0) : data(n) {}
+//     ~SecureBuffer() noexcept {
+//         if (!data.empty()) portable_secure_zero(data.data(), data.size());
+//     }
+//
+//     SecureBuffer(const SecureBuffer&) = delete;
+//     SecureBuffer& operator=(const SecureBuffer&) = delete;
+//     SecureBuffer(SecureBuffer&&) = default;
+//     SecureBuffer& operator=(SecureBuffer&&) = default;
+// };
 
 struct EvpKeyDeleter {
     void operator()(EVP_PKEY* key) const noexcept {
@@ -21,10 +39,7 @@ struct EvpKeyDeleter {
         }
     }
 };
-
 using EvpKeyPtr = std::unique_ptr<EVP_PKEY, EvpKeyDeleter>;
-using CipherCtxPtr = std::unique_ptr<EVP_CIPHER_CTX, decltype(&EVP_CIPHER_CTX_free)>;
-using MdCtxPtr = std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)>;
 
 result::Result<EvpKeyPtr> loadPrivateKey(const std::filesystem::path& path);
 result::Result<EvpKeyPtr> loadPublicKey(const std::filesystem::path& path);

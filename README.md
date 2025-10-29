@@ -1,6 +1,6 @@
 # filecrypt
 
-Minimal AES-256-GCM file encryptor/decryptor with RSA-SHA256 signing. Everything runs on standard C++23 and OpenSSL.
+Minimal AES-256-GCM file encryptor/decryptor with EC (P-256) signing. Everything runs on standard C++23 and OpenSSL.
 
 ## What it does
 

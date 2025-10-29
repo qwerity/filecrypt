@@ -1,5 +1,6 @@
 #include "crypto.h"
 
+#include <cctype>
 #include <algorithm>
 #include <array>
 #include <fstream>
@@ -17,7 +18,13 @@ namespace crypto {
 
 namespace {
 
+constexpr std::size_t CHUNK_SIZE = 4096;
+constexpr std::size_t LARGE_CHUNK_SIZE = 1024 * 1024;  // 1 MiB chunks for large files
+constexpr std::uintmax_t LARGE_FILE_THRESHOLD = 1024ULL * 1024ULL * 1024ULL;  // 1 GiB
+
 using BioPtr = std::unique_ptr<BIO, decltype(&BIO_free)>;
+using CipherCtxPtr = std::unique_ptr<EVP_CIPHER_CTX, decltype(&EVP_CIPHER_CTX_free)>;
+using MdCtxPtr = std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)>;
 
 std::string currentOpenSslError() {
     std::array<char, 256> buffer{};
@@ -28,13 +35,6 @@ std::string currentOpenSslError() {
     ERR_error_string_n(code, buffer.data(), buffer.size());
     return {buffer.data()};
 }
-
-constexpr std::size_t CHUNK_SIZE = 4096;
-constexpr std::size_t LARGE_CHUNK_SIZE = 1024 * 1024;  // 1 MiB chunks for large files
-constexpr std::uintmax_t LARGE_FILE_THRESHOLD = 1024ULL * 1024ULL * 1024ULL;  // 1 GiB
-constexpr std::size_t AES_256_KEY_SIZE = 32;
-constexpr std::size_t AES_256_GCM_IV_SIZE = 12;
-constexpr std::size_t AES_256_GCM_TAG_SIZE = 16;
 
 std::size_t resolveChunkSize(const std::filesystem::path& path) {
     std::error_code ec;
@@ -159,7 +159,6 @@ result::Result<EncryptionResult> encryptFile(const std::filesystem::path& plainT
         return result::makeError("Failed to open ciphertext file: " + cipherTextPath.string());
     }
 
-    const auto bufferSize = resolveChunkSize(plainTextPath);
     EncryptionResult result;
     result.iv.resize(AES_256_GCM_IV_SIZE);
     if (RAND_bytes(result.iv.data(), static_cast<int>(result.iv.size())) != 1) {
@@ -182,6 +181,7 @@ result::Result<EncryptionResult> encryptFile(const std::filesystem::path& plainT
         return result::makeError("EVP_EncryptInit_ex (key/iv) failed: " + currentOpenSslError());
     }
 
+    const auto bufferSize = resolveChunkSize(plainTextPath);
     std::vector<unsigned char> inBuffer(bufferSize);
     std::vector<unsigned char> outBuffer(bufferSize + EVP_MAX_BLOCK_LENGTH);
     int outLen = 0;

@@ -17,6 +17,7 @@ struct CommonOptions {
     std::filesystem::path inputPath;
     std::filesystem::path outputPath;
     std::string encryptionKeyHex;
+    bool verbose{false};
 };
 
 struct EncryptOptions : CommonOptions {
@@ -28,7 +29,9 @@ struct DecryptOptions : CommonOptions {
     std::string signatureHexInput;
 };
 
-using ProgramOptions = std::variant<EncryptOptions, DecryptOptions>;
+struct HelpRequested {};
+
+using ProgramOptions = std::variant<EncryptOptions, DecryptOptions, HelpRequested>;
 
 result::Result<ProgramOptions> parseArguments(int argc, char** argv);
 
