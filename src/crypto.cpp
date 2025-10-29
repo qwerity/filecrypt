@@ -257,6 +257,9 @@ result::Result<void> decryptFile(const std::filesystem::path& cipherTextPath, co
     const std::streamoff totalSize = cipherTextFile.tellg();
     cipherTextFile.seekg(AES_256_GCM_IV_SIZE, std::ios::beg);
     const std::streamoff cipherTextOnlySize = totalSize - AES_256_GCM_IV_SIZE - AES_256_GCM_TAG_SIZE;
+    if (cipherTextOnlySize < 0) {
+        return result::makeError("Invalid ciphertext file: file is too small for IV and tag.");
+    }
 
     std::streamoff bytesToRead = cipherTextOnlySize;
     const auto chunkSize = static_cast<std::streamsize>(bufferSize);
