@@ -229,7 +229,7 @@ result::Result<void> decryptFile(const std::filesystem::path& cipherTextPath, co
     ByteBuffer iv(AES_256_GCM_IV_SIZE);
     cipherTextFile.read(reinterpret_cast<char*>(iv.data()), iv.size());
 
-    cipherTextFile.seekg(-(static_cast<long>(AES_256_GCM_TAG_SIZE)), std::ios::end);
+    cipherTextFile.seekg(-static_cast<long>(AES_256_GCM_TAG_SIZE), std::ios::end);
     ByteBuffer tag(AES_256_GCM_TAG_SIZE);
     cipherTextFile.read(reinterpret_cast<char*>(tag.data()), tag.size());
     cipherTextFile.seekg(AES_256_GCM_IV_SIZE, std::ios::beg);
@@ -320,7 +320,7 @@ result::Result<std::string> bytesToHex(const ByteBuffer& bytes) {
     OPENSSL_free(hexBuffer);
 
     hexString.erase(std::ranges::remove(hexString, ':').begin(), hexString.end());
-    std::ranges::transform(hexString, hexString.begin(), [](unsigned char c) {
+    std::ranges::transform(hexString, hexString.begin(), [](const unsigned char c) {
         return static_cast<char>(std::tolower(c));
     });
 

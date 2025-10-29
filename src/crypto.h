@@ -41,7 +41,7 @@ result::Result<EncryptionResult> encryptFile(const std::filesystem::path& plainT
 result::Result<void> decryptFile(const std::filesystem::path& cipherTextPath, const std::filesystem::path& plainTextPath, const ByteBuffer& key);
 
 result::Result<ByteBuffer> hexToBytes(std::string_view hex);
-result::Result<std::string> bytesToHex(const ByteBuffer& data);
+result::Result<std::string> bytesToHex(const ByteBuffer& bytes);
 
 result::Result<std::string> generateRandomEncryptionKeyHex();
 

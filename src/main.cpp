@@ -4,7 +4,7 @@
 
 #include <iostream>
 
-int main(int argc, char** argv) {
+int main(const int argc, char** argv) {
     const auto optionsResult = options::parseArguments(argc, argv);
     if (!optionsResult) {
         std::cerr << "Error: " << optionsResult.error() << '\n';
