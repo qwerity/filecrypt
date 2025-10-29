@@ -16,6 +16,8 @@ result::Status runEncrypt(const options::EncryptOptions& options) {
 
     const auto encryptedResult = crypto::encryptFile(options.inputPath, options.outputPath, *encKeyResult);
     if (!encryptedResult) {
+        std::error_code ec{};
+        std::filesystem::remove(options.outputPath, ec);
         return result::makeError(encryptedResult.error());
     }
 
@@ -66,6 +68,8 @@ result::Status runDecrypt(const options::DecryptOptions& options) {
     }
 
     if (const auto status = crypto::decryptFile(options.inputPath, options.outputPath, *encKeyResult); !status) {
+        std::error_code ec{};
+        std::filesystem::remove(options.outputPath, ec);
         return status;
     }
 
