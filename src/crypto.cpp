@@ -20,7 +20,7 @@ namespace crypto {
 namespace {
 
 constexpr std::size_t CHUNK_SIZE = 4096;
-constexpr std::size_t LARGE_CHUNK_SIZE = 1024 * 1024;  // 1 MiB chunks for large files
+constexpr std::size_t LARGE_CHUNK_SIZE = 4 * 1024 * 1024;  // 4 MiB chunks for large files
 constexpr std::uintmax_t LARGE_FILE_THRESHOLD = 1024ULL * 1024ULL * 1024ULL;  // 1 GiB
 
 using BioPtr = std::unique_ptr<BIO, decltype(&BIO_free)>;
