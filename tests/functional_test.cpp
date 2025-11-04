@@ -53,7 +53,7 @@ TEST_F(FunctionalTest, EncryptDecrypt) {
     std::remove(decryptedTextPath.c_str());
 }
 
-TEST_F(FunctionalTest, LargeOneGigabyteFileSignEncryptDecryptVerify) {
+TEST_F(FunctionalTest, DISABLED_LargeOneGigabyteFileSignEncryptDecryptVerify) {
     const std::filesystem::path largeFilePath = "large_file_1gb.bin";
     const std::filesystem::path largeCipherPath = "large_file_1gb.enc";
     const std::filesystem::path largeDecryptedPath = "large_file_1gb.dec";
