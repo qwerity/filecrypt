@@ -27,6 +27,18 @@ using BioPtr = std::unique_ptr<BIO, decltype(&BIO_free)>;
 using CipherCtxPtr = std::unique_ptr<EVP_CIPHER_CTX, decltype(&EVP_CIPHER_CTX_free)>;
 using MdCtxPtr = std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)>;
 
+template <typename T>
+struct OpenSslFreeDeleter {
+    void operator()(T* ptr) const noexcept {
+        if (ptr != nullptr) {
+            OPENSSL_free(ptr);
+        }
+    }
+};
+
+using OpenSslBytePtr = std::unique_ptr<unsigned char, OpenSslFreeDeleter<unsigned char>>;
+using OpenSslCharPtr = std::unique_ptr<char, OpenSslFreeDeleter<char>>;
+
 std::string currentOpenSslError() {
     std::array<char, 256> buffer{};
     const unsigned long code = ERR_get_error();
@@ -297,16 +309,14 @@ result::Result<ByteBuffer> hexToBytes(const std::string_view hex) {
 
     const std::string hexString(hex);
     long decodedLength = 0;
-    unsigned char* rawBuffer = OPENSSL_hexstr2buf(hexString.c_str(), &decodedLength);
-    if (rawBuffer == nullptr) {
+    const OpenSslBytePtr rawBuffer(OPENSSL_hexstr2buf(hexString.c_str(), &decodedLength));
+    if (!rawBuffer) {
         return result::makeError("OPENSSL_hexstr2buf failed: " + currentOpenSslError());
     }
     if (decodedLength < 0) {
-        OPENSSL_free(rawBuffer);
         return result::makeError("OPENSSL_hexstr2buf returned negative length");
     }
-    ByteBuffer buffer(rawBuffer, rawBuffer + static_cast<std::size_t>(decodedLength));
-    OPENSSL_free(rawBuffer);
+    ByteBuffer buffer(rawBuffer.get(), rawBuffer.get() + static_cast<std::size_t>(decodedLength));
     return buffer;
 }
 
@@ -323,13 +333,12 @@ result::Result<std::string> bytesToHex(const std::span<const unsigned char> byte
         return {};
     }
 
-    char* hexBuffer = OPENSSL_buf2hexstr(bytes.data(), static_cast<long>(bytes.size()));
-    if (hexBuffer == nullptr) {
+    const OpenSslCharPtr hexBuffer(OPENSSL_buf2hexstr(bytes.data(), static_cast<long>(bytes.size())));
+    if (!hexBuffer) {
         return result::makeError("OPENSSL_buf2hexstr failed: " + currentOpenSslError());
     }
 
-    std::string hexString(hexBuffer);
-    OPENSSL_free(hexBuffer);
+    std::string hexString(hexBuffer.get());
 
     hexString.erase(std::ranges::remove(hexString, ':').begin(), hexString.end());
     std::ranges::transform(hexString, hexString.begin(), [](const unsigned char c) {
