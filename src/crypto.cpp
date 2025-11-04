@@ -1,12 +1,13 @@
 #include "crypto.h"
 
 #include <cctype>
-#include <algorithm>
 #include <array>
+#include <algorithm>
 #include <fstream>
 #include <system_error>
 #include <string>
 #include <vector>
+#include <utility>
 
 #include <openssl/buffer.h>
 #include <openssl/crypto.h>
@@ -145,7 +146,7 @@ result::Result<void> verifyFileSignature(const std::filesystem::path& path, cons
     return result::makeError("EVP_DigestVerifyFinal failed: " + currentOpenSslError());
 }
 
-result::Result<EncryptionResult> encryptFile(const std::filesystem::path& plainTextPath, const std::filesystem::path& cipherTextPath, const ByteBuffer& key) {
+result::Result<EncryptionResult> encryptFile(const std::filesystem::path& plainTextPath, const std::filesystem::path& cipherTextPath, const SecureBuffer& key) {
     if (key.size() != AES_256_KEY_SIZE) {
         return result::makeError("AES-256 key must be 32 bytes (64 hex characters)");
     }
@@ -212,7 +213,7 @@ result::Result<EncryptionResult> encryptFile(const std::filesystem::path& plainT
     return result;
 }
 
-result::Result<void> decryptFile(const std::filesystem::path& cipherTextPath, const std::filesystem::path& plainTextPath, const ByteBuffer& key) {
+result::Result<void> decryptFile(const std::filesystem::path& cipherTextPath, const std::filesystem::path& plainTextPath, const SecureBuffer& key) {
     if (key.size() != AES_256_KEY_SIZE) {
         return result::makeError("AES-256 key must be 32 bytes (64 hex characters)");
     }
@@ -309,7 +310,15 @@ result::Result<ByteBuffer> hexToBytes(const std::string_view hex) {
     return buffer;
 }
 
-result::Result<std::string> bytesToHex(const ByteBuffer& bytes) {
+result::Result<SecureBuffer> hexToSecureBuffer(const std::string_view hex) {
+    auto bytes = hexToBytes(hex);
+    if (!bytes) {
+        return result::makeError(bytes.error());
+    }
+    return SecureBuffer(std::move(bytes.value()));
+}
+
+result::Result<std::string> bytesToHex(const std::span<const unsigned char> bytes) {
     if (bytes.empty()) {
         return {};
     }
@@ -331,13 +340,13 @@ result::Result<std::string> bytesToHex(const ByteBuffer& bytes) {
 }
 
 result::Result<std::string> generateRandomEncryptionKeyHex() {
-    ByteBuffer encKey(AES_256_KEY_SIZE);
+    SecureBuffer encKey(AES_256_KEY_SIZE);
 
     if (RAND_bytes(encKey.data(), static_cast<int>(encKey.size())) != 1) {
         return result::makeError("RAND_bytes failed: " + currentOpenSslError());
     }
 
-    const auto hexEnckey = bytesToHex(encKey);
+    const auto hexEnckey = bytesToHex(encKey.span());
     if (!hexEnckey) {
         return result::makeError(hexEnckey.error());
     }

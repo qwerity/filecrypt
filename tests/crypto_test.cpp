@@ -38,12 +38,13 @@ TEST_F(CryptoTest, SignAndVerify) {
 }
 
 TEST_F(CryptoTest, EncryptAndDecrypt) {
-    const auto key = crypto::hexToBytes("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef").value();
+    auto key = crypto::hexToSecureBuffer("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    ASSERT_TRUE(key.has_value());
 
-    const auto encResult = crypto::encryptFile(plainTextPath, cipherTextPath, key);
+    const auto encResult = crypto::encryptFile(plainTextPath, cipherTextPath, key.value());
     ASSERT_TRUE(encResult.has_value());
 
-    const auto decResult = crypto::decryptFile(cipherTextPath, decryptedTextPath, key);
+    const auto decResult = crypto::decryptFile(cipherTextPath, decryptedTextPath, key.value());
     ASSERT_TRUE(decResult.has_value());
 
     // Compare the original and decrypted files
@@ -61,12 +62,13 @@ TEST_F(CryptoTest, EmptyFile) {
     std::ofstream empty_file("empty_file.txt");
     empty_file.close();
 
-    const auto key = crypto::hexToBytes("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef").value();
+    auto key = crypto::hexToSecureBuffer("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    ASSERT_TRUE(key.has_value());
 
-    const auto encResult = crypto::encryptFile("empty_file.txt", "empty_file.enc", key);
+    const auto encResult = crypto::encryptFile("empty_file.txt", "empty_file.enc", key.value());
     ASSERT_TRUE(encResult.has_value());
 
-    const auto decResult = crypto::decryptFile("empty_file.enc", "empty_file.dec", key);
+    const auto decResult = crypto::decryptFile("empty_file.enc", "empty_file.dec", key.value());
     ASSERT_TRUE(decResult.has_value());
 
     std::ifstream decrypted_file("empty_file.dec");
@@ -79,13 +81,15 @@ TEST_F(CryptoTest, EmptyFile) {
 }
 
 TEST_F(CryptoTest, IncorrectKey) {
-    const auto key = crypto::hexToBytes("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef").value();
-    const auto wrong_key = crypto::hexToBytes("fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210").value();
+    auto key = crypto::hexToSecureBuffer("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    ASSERT_TRUE(key.has_value());
+    auto wrong_key = crypto::hexToSecureBuffer("fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210");
+    ASSERT_TRUE(wrong_key.has_value());
 
-    const auto encResult = crypto::encryptFile(plainTextPath, cipherTextPath, key);
+    const auto encResult = crypto::encryptFile(plainTextPath, cipherTextPath, key.value());
     ASSERT_TRUE(encResult.has_value());
 
-    const auto decResult = crypto::decryptFile(cipherTextPath, decryptedTextPath, wrong_key);
+    const auto decResult = crypto::decryptFile(cipherTextPath, decryptedTextPath, wrong_key.value());
     EXPECT_FALSE(decResult.has_value());
 
     std::remove(cipherTextPath.c_str());
@@ -107,9 +111,10 @@ TEST_F(CryptoTest, CorruptedSignature) {
 }
 
 TEST_F(CryptoTest, CorruptedCiphertext) {
-    const auto key = crypto::hexToBytes("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef").value();
+    auto key = crypto::hexToSecureBuffer("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    ASSERT_TRUE(key.has_value());
 
-    const auto encResult = crypto::encryptFile(plainTextPath, cipherTextPath, key);
+    const auto encResult = crypto::encryptFile(plainTextPath, cipherTextPath, key.value());
     ASSERT_TRUE(encResult.has_value());
 
     // Corrupt the ciphertext
@@ -118,7 +123,7 @@ TEST_F(CryptoTest, CorruptedCiphertext) {
     cipher_file.put('X');
     cipher_file.close();
 
-    const auto decResult = crypto::decryptFile(cipherTextPath, decryptedTextPath, key);
+    const auto decResult = crypto::decryptFile(cipherTextPath, decryptedTextPath, key.value());
     EXPECT_FALSE(decResult.has_value());
 
     std::remove(cipherTextPath.c_str());
@@ -139,10 +144,11 @@ TEST_F(CryptoTest, BinaryFileRoundTrip) {
         }
     }
 
-    const auto key = crypto::hexToBytes("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef").value();
-    auto encResult = crypto::encryptFile(binaryPath, cipherPath, key);
+    auto keySecure = crypto::hexToSecureBuffer("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    ASSERT_TRUE(keySecure.has_value());
+    auto encResult = crypto::encryptFile(binaryPath, cipherPath, keySecure.value());
     ASSERT_TRUE(encResult.has_value());
-    auto decResult = crypto::decryptFile(cipherPath, restoredPath, key);
+    auto decResult = crypto::decryptFile(cipherPath, restoredPath, keySecure.value());
     ASSERT_TRUE(decResult.has_value());
 
     std::ifstream original(binaryPath, std::ios::binary);

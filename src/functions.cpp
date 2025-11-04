@@ -4,7 +4,7 @@
 #include <iostream>
 
 result::Status runEncrypt(const options::EncryptOptions& options) {
-    const auto encKeyResult = crypto::hexToBytes(options.encryptionKeyHex);
+    auto encKeyResult = crypto::hexToSecureBuffer(options.encryptionKeyHex);
     if (!encKeyResult) {
         return result::makeError(encKeyResult.error());
     }
@@ -14,7 +14,7 @@ result::Status runEncrypt(const options::EncryptOptions& options) {
         return result::makeError(signingKeyResult.error());
     }
 
-    const auto encryptedResult = crypto::encryptFile(options.inputPath, options.outputPath, *encKeyResult);
+    const auto encryptedResult = crypto::encryptFile(options.inputPath, options.outputPath, encKeyResult.value());
     if (!encryptedResult) {
         std::error_code ec{};
         std::filesystem::remove(options.outputPath, ec);
@@ -55,7 +55,7 @@ result::Status runEncrypt(const options::EncryptOptions& options) {
 }
 
 result::Status runDecrypt(const options::DecryptOptions& options) {
-    const auto encKeyResult = crypto::hexToBytes(options.encryptionKeyHex);
+    auto encKeyResult = crypto::hexToSecureBuffer(options.encryptionKeyHex);
     if (!encKeyResult) {
         return result::makeError(encKeyResult.error());
     }
@@ -70,7 +70,7 @@ result::Status runDecrypt(const options::DecryptOptions& options) {
         return result::makeError(verificationKeyResult.error());
     }
 
-    if (const auto status = crypto::decryptFile(options.inputPath, options.outputPath, *encKeyResult); !status) {
+    if (const auto status = crypto::decryptFile(options.inputPath, options.outputPath, encKeyResult.value()); !status) {
         std::error_code ec{};
         std::filesystem::remove(options.outputPath, ec);
         return status;

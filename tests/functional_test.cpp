@@ -83,17 +83,18 @@ TEST_F(FunctionalTest, LargeOneGigabyteFileSignEncryptDecryptVerify) {
     }
     ASSERT_EQ(std::filesystem::file_size(largeFilePath), largeFileSize);
 
-    const auto key = crypto::hexToBytes("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef").value();
+    auto key = crypto::hexToSecureBuffer("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    ASSERT_TRUE(key.has_value());
     const auto privateKey = crypto::loadPrivateKey(privateKeyPath).value();
     const auto publicKey = crypto::loadPublicKey(publicKeyPath).value();
 
     const auto signature = crypto::signFile(largeFilePath, privateKey.get());
     ASSERT_TRUE(signature.has_value());
 
-    const auto encResult = crypto::encryptFile(largeFilePath, largeCipherPath, key);
+    const auto encResult = crypto::encryptFile(largeFilePath, largeCipherPath, key.value());
     ASSERT_TRUE(encResult.has_value());
 
-    const auto decResult = crypto::decryptFile(largeCipherPath, largeDecryptedPath, key);
+    const auto decResult = crypto::decryptFile(largeCipherPath, largeDecryptedPath, key.value());
     ASSERT_TRUE(decResult.has_value());
 
     const auto verification = crypto::verifyFileSignature(largeDecryptedPath, signature.value(), publicKey.get());
