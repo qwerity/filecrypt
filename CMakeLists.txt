@@ -18,6 +18,8 @@ find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 set(LIB_SOURCES
     src/crypto.cpp
     src/crypto.h
+    src/file.cpp
+    src/file.h
     src/options.cpp
     src/options.h
     src/result.h

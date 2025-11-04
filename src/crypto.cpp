@@ -1,10 +1,13 @@
 #include "crypto.h"
+#include "file.h"
 
 #include <cctype>
 #include <array>
 #include <algorithm>
 #include <fstream>
+#include <iostream>
 #include <system_error>
+#include <span>
 #include <string>
 #include <vector>
 #include <utility>
@@ -18,10 +21,6 @@
 namespace crypto {
 
 namespace {
-
-constexpr std::size_t CHUNK_SIZE = 4096;
-constexpr std::size_t LARGE_CHUNK_SIZE = 4 * 1024 * 1024;  // 4 MiB chunks for large files
-constexpr std::uintmax_t LARGE_FILE_THRESHOLD = 1024ULL * 1024ULL * 1024ULL;  // 1 GiB
 
 using BioPtr = std::unique_ptr<BIO, decltype(&BIO_free)>;
 using CipherCtxPtr = std::unique_ptr<EVP_CIPHER_CTX, decltype(&EVP_CIPHER_CTX_free)>;
@@ -50,12 +49,16 @@ std::string currentOpenSslError() {
 }
 
 std::size_t resolveChunkSize(const std::filesystem::path& path) {
+    constexpr std::size_t CHUNK_SIZE = 256 * 1024; // 256KiB
+    constexpr std::size_t LARGE_CHUNK_SIZE = 4 * 1024 * 1024;  // 4 MiB chunks for large files
+    constexpr std::uintmax_t LARGE_FILE_THRESHOLD = 512ULL * 1024ULL * 1024ULL;  // 1 GiB
+
     std::error_code ec;
     const auto fileSize = std::filesystem::file_size(path, ec);
     if (!ec && fileSize >= LARGE_FILE_THRESHOLD) {
         return LARGE_CHUNK_SIZE;
     }
-    return CHUNK_SIZE;
+    return std::min(fileSize, static_cast<std::size_t>(CHUNK_SIZE));
 }
 
 }  // namespace
@@ -100,13 +103,19 @@ result::Result<ByteBuffer> signFile(const std::filesystem::path& path, EVP_PKEY*
 
     const auto bufferSize = resolveChunkSize(path);
     std::vector<char> buffer(bufferSize);
-    while (file) {
-        file.read(buffer.data(), buffer.size());
-        const auto bytesRead = file.gcount();
-        if (bytesRead > 0) {
-            if (EVP_DigestSignUpdate(ctx.get(), buffer.data(), bytesRead) != 1) {
-                return result::makeError("EVP_DigestSignUpdate failed: " + currentOpenSslError());
-            }
+    std::span bufferSpan(buffer);
+    const auto readContext = std::string("reading data for signing from ") + path.string();
+    while (true) {
+        const auto readResult = file::readSome(file, std::as_writable_bytes(bufferSpan), readContext);
+        if (!readResult) {
+            return result::makeError(readResult.error());
+        }
+        const auto bytesRead = readResult.value();
+        if (bytesRead == 0) {
+            break;
+        }
+        if (EVP_DigestSignUpdate(ctx.get(), buffer.data(), bytesRead) != 1) {
+            return result::makeError("EVP_DigestSignUpdate failed: " + currentOpenSslError());
         }
     }
 
@@ -138,13 +147,19 @@ result::Result<void> verifyFileSignature(const std::filesystem::path& path, cons
 
     const auto bufferSize = resolveChunkSize(path);
     std::vector<char> buffer(bufferSize);
-    while (file) {
-        file.read(buffer.data(), buffer.size());
-        const auto bytesRead = file.gcount();
-        if (bytesRead > 0) {
-            if (EVP_DigestVerifyUpdate(ctx.get(), buffer.data(), bytesRead) != 1) {
-                return result::makeError("EVP_DigestVerifyUpdate failed: " + currentOpenSslError());
-            }
+    std::span<char> bufferSpan(buffer);
+    const auto readContext = std::string("reading data for signature verification from ") + path.string();
+    while (true) {
+        const auto readResult = file::readSome(file, std::as_writable_bytes(bufferSpan), readContext);
+        if (!readResult) {
+            return result::makeError(readResult.error());
+        }
+        const auto bytesRead = readResult.value();
+        if (bytesRead == 0) {
+            break;
+        }
+        if (EVP_DigestVerifyUpdate(ctx.get(), buffer.data(), bytesRead) != 1) {
+            return result::makeError("EVP_DigestVerifyUpdate failed: " + currentOpenSslError());
         }
     }
 
@@ -163,13 +178,16 @@ result::Result<EncryptionResult> encryptFile(const std::filesystem::path& plainT
         return result::makeError("AES-256 key must be 32 bytes (64 hex characters)");
     }
 
+    const auto plainPathStr = plainTextPath.string();
+    const auto cipherPathStr = cipherTextPath.string();
+
     std::ifstream plainTextFile(plainTextPath, std::ios::binary);
     if (!plainTextFile) {
-        return result::makeError("Failed to open plaintext file: " + plainTextPath.string());
+        return result::makeError("Failed to open plaintext file: " + plainPathStr);
     }
     std::ofstream cipherTextFile(cipherTextPath, std::ios::binary);
     if (!cipherTextFile) {
-        return result::makeError("Failed to open ciphertext file: " + cipherTextPath.string());
+        return result::makeError("Failed to open ciphertext file: " + cipherPathStr);
     }
 
     EncryptionResult result;
@@ -178,7 +196,11 @@ result::Result<EncryptionResult> encryptFile(const std::filesystem::path& plainT
         return result::makeError("RAND_bytes failed: " + currentOpenSslError());
     }
 
-    cipherTextFile.write(reinterpret_cast<char*>(result.iv.data()),  static_cast<int>(result.iv.size()));
+    const std::span<const unsigned char> ivSpan(result.iv);
+    const auto ivWriteContext = std::string("writing IV to ") + cipherPathStr;
+    if (const auto status = file::writeAll(cipherTextFile, std::as_bytes(ivSpan), ivWriteContext); !status) {
+        return result::makeError(status.error());
+    }
 
     const CipherCtxPtr ctx(EVP_CIPHER_CTX_new(), EVP_CIPHER_CTX_free);
     if (!ctx) {
@@ -198,29 +220,50 @@ result::Result<EncryptionResult> encryptFile(const std::filesystem::path& plainT
     std::vector<unsigned char> inBuffer(bufferSize);
     std::vector<unsigned char> outBuffer(bufferSize + EVP_MAX_BLOCK_LENGTH);
     int outLen = 0;
+    std::span<unsigned char> inSpan(inBuffer);
+    const auto readContext = std::string("reading plaintext for encryption from ") + plainPathStr;
+    const auto writeContext = std::string("writing ciphertext chunk to ") + cipherPathStr;
 
-    while (plainTextFile) {
-        plainTextFile.read(reinterpret_cast<char*>(inBuffer.data()), inBuffer.size());
-        const auto bytesRead = static_cast<int>(plainTextFile.gcount());
-        if (bytesRead > 0) {
-            if (EVP_EncryptUpdate(ctx.get(), outBuffer.data(), &outLen, inBuffer.data(), bytesRead) != 1) {
-                return result::makeError("EVP_EncryptUpdate failed: " + currentOpenSslError());
+    while (true) {
+        const auto readResult = file::readSome(plainTextFile, std::as_writable_bytes(inSpan), readContext);
+        if (!readResult) {
+            return result::makeError(readResult.error());
+        }
+        const auto bytesRead = static_cast<int>(readResult.value());
+        if (bytesRead == 0) {
+            break;
+        }
+        if (EVP_EncryptUpdate(ctx.get(), outBuffer.data(), &outLen, inBuffer.data(), bytesRead) != 1) {
+            return result::makeError("EVP_EncryptUpdate failed: " + currentOpenSslError());
+        }
+        if (outLen > 0) {
+            std::span<const unsigned char> outSpan(outBuffer.data(), static_cast<std::size_t>(outLen));
+            if (const auto status = file::writeAll(cipherTextFile, std::as_bytes(outSpan), writeContext); !status) {
+                return result::makeError(status.error());
             }
-            cipherTextFile.write(reinterpret_cast<char*>(outBuffer.data()), outLen);
         }
     }
 
     if (EVP_EncryptFinal_ex(ctx.get(), outBuffer.data(), &outLen) != 1) {
         return result::makeError("EVP_EncryptFinal_ex failed: " + currentOpenSslError());
     }
-    cipherTextFile.write(reinterpret_cast<char*>(outBuffer.data()), outLen);
+    if (outLen > 0) {
+        std::span<const unsigned char> outSpan(outBuffer.data(), static_cast<std::size_t>(outLen));
+        if (const auto status = file::writeAll(cipherTextFile, std::as_bytes(outSpan), writeContext); !status) {
+            return result::makeError(status.error());
+        }
+    }
 
     result.tag.resize(AES_256_GCM_TAG_SIZE);
     if (EVP_CIPHER_CTX_ctrl(ctx.get(), EVP_CTRL_GCM_GET_TAG, static_cast<int>(result.tag.size()), result.tag.data()) != 1) {
         return result::makeError("EVP_CIPHER_CTX_ctrl (GET_TAG) failed: " + currentOpenSslError());
     }
 
-    cipherTextFile.write(reinterpret_cast<char*>(result.tag.data()), result.tag.size());
+    const std::span<const unsigned char> tagSpan(result.tag);
+    const auto tagWriteContext = std::string("writing authentication tag to ") + cipherPathStr;
+    if (const auto status = file::writeAll(cipherTextFile, std::as_bytes(tagSpan), tagWriteContext); !status) {
+        return result::makeError(status.error());
+    }
 
     return result;
 }
@@ -230,22 +273,38 @@ result::Result<void> decryptFile(const std::filesystem::path& cipherTextPath, co
         return result::makeError("AES-256 key must be 32 bytes (64 hex characters)");
     }
 
+    const auto cipherPathStr = cipherTextPath.string();
+    const auto plainPathStr = plainTextPath.string();
+
     std::ifstream cipherTextFile(cipherTextPath, std::ios::binary);
     if (!cipherTextFile) {
-        return result::makeError("Failed to open ciphertext file: " + cipherTextPath.string());
+        return result::makeError("Failed to open ciphertext file: " + cipherPathStr);
     }
     std::ofstream plainTextFile(plainTextPath, std::ios::binary);
     if (!plainTextFile) {
-        return result::makeError("Failed to open plaintext file: " + plainTextPath.string());
+        return result::makeError("Failed to open plaintext file: " + plainPathStr);
     }
 
     ByteBuffer iv(AES_256_GCM_IV_SIZE);
-    cipherTextFile.read(reinterpret_cast<char*>(iv.data()), iv.size());
+    const auto readIvContext = std::string("reading IV from ") + cipherPathStr;
+    if (const auto status = file::readExact(cipherTextFile, std::as_writable_bytes(std::span(iv)), readIvContext); !status) {
+        return status;
+    }
 
-    cipherTextFile.seekg(-static_cast<long>(AES_256_GCM_TAG_SIZE), std::ios::end);
+    const auto seekTagContext = std::string("seeking to authentication tag in ") + cipherPathStr;
+    if (const auto status = file::seek(cipherTextFile, -static_cast<std::streamoff>(AES_256_GCM_TAG_SIZE), std::ios::end, seekTagContext); !status) {
+        return status;
+    }
     ByteBuffer tag(AES_256_GCM_TAG_SIZE);
-    cipherTextFile.read(reinterpret_cast<char*>(tag.data()), tag.size());
-    cipherTextFile.seekg(AES_256_GCM_IV_SIZE, std::ios::beg);
+    const auto readTagContext = std::string("reading authentication tag from ") + cipherPathStr;
+    if (const auto status = file::readExact(cipherTextFile, std::as_writable_bytes(std::span(tag)), readTagContext); !status) {
+        return status;
+    }
+
+    const auto seekBodyContext = std::string("seeking to ciphertext body in ") + cipherPathStr;
+    if (const auto status = file::seek(cipherTextFile, static_cast<std::streamoff>(AES_256_GCM_IV_SIZE), std::ios::beg, seekBodyContext); !status) {
+        return status;
+    }
 
     const CipherCtxPtr ctx(EVP_CIPHER_CTX_new(), EVP_CIPHER_CTX_free);
     if (!ctx) {
@@ -266,27 +325,42 @@ result::Result<void> decryptFile(const std::filesystem::path& cipherTextPath, co
     std::vector<unsigned char> outBuffer(bufferSize + EVP_MAX_BLOCK_LENGTH);
     int outLen = 0;
 
-    cipherTextFile.seekg(0, std::ios::end);
+    if (const auto status = file::seek(cipherTextFile, 0, std::ios::end, std::string("seeking to end of ciphertext file ") + cipherPathStr); !status) {
+        return status;
+    }
     const std::streamoff totalSize = cipherTextFile.tellg();
-    cipherTextFile.seekg(AES_256_GCM_IV_SIZE, std::ios::beg);
-    const std::streamoff cipherTextOnlySize = totalSize - AES_256_GCM_IV_SIZE - AES_256_GCM_TAG_SIZE;
+    if (totalSize < 0) {
+        auto message = std::string("Failed to determine ciphertext size for ") + cipherPathStr;
+        std::cerr << message << '\n';
+        return result::makeError(std::move(message));
+    }
+    if (const auto status = file::seek(cipherTextFile, static_cast<std::streamoff>(AES_256_GCM_IV_SIZE), std::ios::beg, seekBodyContext); !status) {
+        return status;
+    }
+    const std::streamoff cipherTextOnlySize = totalSize - static_cast<std::streamoff>(AES_256_GCM_IV_SIZE) - static_cast<std::streamoff>(AES_256_GCM_TAG_SIZE);
     if (cipherTextOnlySize < 0) {
         return result::makeError("Invalid ciphertext file: file is too small for IV and tag.");
     }
 
-    std::streamoff bytesToRead = cipherTextOnlySize;
-    const auto chunkSize = static_cast<std::streamsize>(bufferSize);
-    while (bytesToRead > 0) {
-        std::streamsize currentChunkSize = chunkSize;
-        if (bytesToRead < currentChunkSize) {
-            currentChunkSize = static_cast<std::streamsize>(bytesToRead);
+    std::streamoff bytesRemaining = cipherTextOnlySize;
+    const auto readCipherContext = std::string("reading ciphertext chunk from ") + cipherPathStr;
+    const auto writePlainContext = std::string("writing plaintext chunk to ") + plainPathStr;
+    while (bytesRemaining > 0) {
+        const auto currentChunkSize = static_cast<std::size_t>(std::min<std::streamoff>(bytesRemaining, static_cast<std::streamoff>(inBuffer.size())));
+        std::span chunkSpan(inBuffer.data(), currentChunkSize);
+        if (const auto status = file::readExact(cipherTextFile, std::as_writable_bytes(chunkSpan), readCipherContext); !status) {
+            return status;
         }
-        cipherTextFile.read(reinterpret_cast<char*>(inBuffer.data()), currentChunkSize);
-        if (EVP_DecryptUpdate(ctx.get(), outBuffer.data(), &outLen, inBuffer.data(), currentChunkSize) != 1) {
+        if (EVP_DecryptUpdate(ctx.get(), outBuffer.data(), &outLen, inBuffer.data(), static_cast<int>(currentChunkSize)) != 1) {
             return result::makeError("EVP_DecryptUpdate failed: " + currentOpenSslError());
         }
-        plainTextFile.write(reinterpret_cast<char*>(outBuffer.data()), outLen);
-        bytesToRead -= currentChunkSize;
+        if (outLen > 0) {
+            std::span<const unsigned char> outSpan(outBuffer.data(), static_cast<std::size_t>(outLen));
+            if (const auto status = file::writeAll(plainTextFile, std::as_bytes(outSpan), writePlainContext); !status) {
+                return status;
+            }
+        }
+        bytesRemaining -= static_cast<std::streamoff>(currentChunkSize);
     }
 
     if (EVP_CIPHER_CTX_ctrl(ctx.get(), EVP_CTRL_GCM_SET_TAG, static_cast<int>(tag.size()), tag.data()) != 1) {
@@ -297,7 +371,12 @@ result::Result<void> decryptFile(const std::filesystem::path& cipherTextPath, co
     if (finalResult != 1) {
         return result::makeError("Decryption failed: authentication tag mismatch");
     }
-    plainTextFile.write(reinterpret_cast<char*>(outBuffer.data()), outLen);
+    if (outLen > 0) {
+        std::span<const unsigned char> outSpan(outBuffer.data(), static_cast<std::size_t>(outLen));
+        if (const auto status = file::writeAll(plainTextFile, std::as_bytes(outSpan), writePlainContext); !status) {
+            return status;
+        }
+    }
 
     return {};
 }
